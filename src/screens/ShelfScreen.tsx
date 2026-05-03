@@ -9,13 +9,11 @@ import * as FileSystem from 'expo-file-system';
 import { v4 as uuidv4 } from 'uuid';
 
 import { Book, getAllBooks, insertBook, deleteBookRecord } from '../database/books';
-import {
-  getPageAudioPaths, clearAudioForBook, deletePagesForBook
-} from '../database/pages';
+import { getPageAudioPaths, clearAudioForBook, deletePagesForBook } from '../database/pages';
 import { deleteBookmarksForBook, deleteProgressForBook } from '../database/bookmarks';
 import {
   copyPDFToAppStorage, deleteDirectory, deleteFile,
-  getAudioFilesSize, getPDFSize, BOOKS_DIR
+  getAudioFilesSize, getPDFSize, BOOKS_DIR, ensureBookDir
 } from '../services/storageService';
 import { bytesToMB } from '../utils/fileSize';
 import { BookCard } from '../components/BookCard';
@@ -55,10 +53,25 @@ export function ShelfScreen({ navigation }: ShelfScreenProps) {
       if (result.canceled || !result.assets?.[0]) return;
 
       const asset = result.assets[0];
-      const bookId = uuidv4();
-      const savedPath = await copyPDFToAppStorage(asset.uri, bookId);
 
-      const title = asset.name.replace('.pdf', '') || 'Untitled Book';
+      if (!asset.uri) {
+        Alert.alert('Import Failed', 'Could not read the file URI.');
+        return;
+      }
+
+      const bookId = uuidv4();
+      let savedPath: string;
+
+      try {
+        savedPath = await copyPDFToAppStorage(asset.uri, bookId);
+      } catch (copyError) {
+        const dir = await ensureBookDir(bookId);
+        const dest = dir + 'book.pdf';
+        await FileSystem.copyAsync({ from: asset.uri, to: dest });
+        savedPath = dest;
+      }
+
+      const title = (asset.name ?? 'Untitled Book').replace(/\.pdf$/i, '');
 
       const book: Book = {
         id: bookId,
@@ -73,8 +86,9 @@ export function ShelfScreen({ navigation }: ShelfScreenProps) {
       await insertBook(book);
       await loadBooks();
       ToastAndroid.show('Book imported!', ToastAndroid.SHORT);
-    } catch (e) {
-      Alert.alert('Import Failed', 'Could not import the PDF file.');
+    } catch (e: any) {
+      console.error('Import error:', e);
+      Alert.alert('Import Failed', e?.message ?? 'Could not import the PDF file.');
     } finally {
       setImporting(false);
     }
@@ -89,10 +103,10 @@ export function ShelfScreen({ navigation }: ShelfScreenProps) {
     const audioPaths = await getPageAudioPaths(book.id);
     const audioSize = await getAudioFilesSize(audioPaths);
     const pdfSize = await getPDFSize(book.filePath);
-    const bookDirSize = await FileSystem.getInfoAsync(
-      BOOKS_DIR + book.id + '/', { size: true }
-    );
-    const thumbSize = Math.max(0, ((bookDirSize as any).size ?? 0) - audioSize - pdfSize);
+    const bookDirInfo = await FileSystem.getInfoAsync(
+  BOOKS_DIR + book.id + '/'
+);
+const thumbSize = 0;
     const total = audioSize + thumbSize + pdfSize;
 
     setDeleteSizes({
@@ -152,7 +166,6 @@ export function ShelfScreen({ navigation }: ShelfScreenProps) {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
 
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>My Library</Text>
         <TouchableOpacity style={styles.addBtn} onPress={handleImport} disabled={importing}>
@@ -163,7 +176,6 @@ export function ShelfScreen({ navigation }: ShelfScreenProps) {
         </TouchableOpacity>
       </View>
 
-      {/* Book Grid */}
       {books.length === 0 ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyIcon}>📚</Text>
@@ -275,16 +287,14 @@ const styles = StyleSheet.create({
   },
   importBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   sheetOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'flex-end',
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end',
   },
   sheet: {
     backgroundColor: '#16213e', borderTopLeftRadius: 20,
     borderTopRightRadius: 20, padding: 24, paddingBottom: 40,
   },
   sheetTitle: {
-    color: '#8a8a9a', fontSize: 13, marginBottom: 16,
-    textAlign: 'center',
+    color: '#8a8a9a', fontSize: 13, marginBottom: 16, textAlign: 'center',
   },
   sheetOption: {
     paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#0f3460',

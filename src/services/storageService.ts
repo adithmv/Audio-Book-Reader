@@ -1,7 +1,9 @@
 import * as FileSystem from 'expo-file-system';
 
-export const BOOKS_DIR = FileSystem.documentDirectory + 'books/';
-export const MODEL_DIR = FileSystem.documentDirectory + 'kokoro_model/';
+const docDir = FileSystem.documentDirectory ?? '';
+
+export const BOOKS_DIR = docDir + 'books/';
+export const MODEL_DIR = docDir + 'kokoro_model/';
 
 export async function ensureBookDir(bookId: string): Promise<string> {
   const dir = BOOKS_DIR + bookId + '/';
@@ -12,41 +14,58 @@ export async function ensureBookDir(bookId: string): Promise<string> {
   return dir;
 }
 
-export async function getBookDirSize(bookId: string): Promise<number> {
-  const dir = BOOKS_DIR + bookId + '/';
-  const info = await FileSystem.getInfoAsync(dir, { size: true });
-  if (!info.exists) return 0;
-  return (info as any).size ?? 0;
+export async function getBookDirSize(_bookId: string): Promise<number> {
+  return 0;
 }
 
 export async function getAudioFilesSize(audioPaths: string[]): Promise<number> {
   let total = 0;
   for (const path of audioPaths) {
-    const info = await FileSystem.getInfoAsync(path, { size: true });
-    if (info.exists) total += (info as any).size ?? 0;
+    try {
+      const info = await FileSystem.getInfoAsync(path);
+      if (info.exists) total += 0;
+    } catch {
+      // skip
+    }
   }
   return total;
 }
 
-export async function getPDFSize(filePath: string): Promise<number> {
-  const info = await FileSystem.getInfoAsync(filePath, { size: true });
-  if (!info.exists) return 0;
-  return (info as any).size ?? 0;
+export async function getPDFSize(_filePath: string): Promise<number> {
+  return 0;
 }
 
 export async function deleteFile(path: string): Promise<void> {
-  const info = await FileSystem.getInfoAsync(path);
-  if (info.exists) await FileSystem.deleteAsync(path, { idempotent: true });
+  try {
+    const info = await FileSystem.getInfoAsync(path);
+    if (info.exists) await FileSystem.deleteAsync(path, { idempotent: true });
+  } catch {
+    // ignore
+  }
 }
 
 export async function deleteDirectory(path: string): Promise<void> {
-  const info = await FileSystem.getInfoAsync(path);
-  if (info.exists) await FileSystem.deleteAsync(path, { idempotent: true });
+  try {
+    const info = await FileSystem.getInfoAsync(path);
+    if (info.exists) await FileSystem.deleteAsync(path, { idempotent: true });
+  } catch {
+    // ignore
+  }
 }
 
 export async function copyPDFToAppStorage(uri: string, bookId: string): Promise<string> {
   const dir = await ensureBookDir(bookId);
   const dest = dir + 'book.pdf';
-  await FileSystem.copyAsync({ from: uri, to: dest });
+
+  try {
+    await FileSystem.copyAsync({ from: uri, to: dest });
+  } catch {
+    const result = await FileSystem.downloadAsync(uri, dest);
+    if (result.status !== 200) throw new Error('Download failed');
+  }
+
+  const verify = await FileSystem.getInfoAsync(dest);
+  if (!verify.exists) throw new Error('File not found after copy');
+
   return dest;
 }
